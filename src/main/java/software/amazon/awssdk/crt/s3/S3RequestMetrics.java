@@ -166,4 +166,8 @@ public class S3RequestMetrics {
     public String getIpAddress() {
         return this.ipAddress;
     }
+
+    public int getResponseStatus() {
+        return this.responseStatus;
+    }
 }
