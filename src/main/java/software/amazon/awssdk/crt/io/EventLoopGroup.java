@@ -89,6 +89,20 @@ public final class EventLoopGroup extends CrtResource {
     }
 
     /**
+     * Gets the number of threads configured for the static default event loop group. This returns the value most
+     * recently set via {@link #setStaticDefaultNumThreads(int)}, or the system-derived default if it was never set.
+     * Note that this reports the configured value regardless of whether the static default event loop group has
+     * actually been created yet.
+     *
+     * @return the number of threads configured for the static default event loop group
+     */
+    public static int getConfiguredStaticDefaultNumThreads() {
+        synchronized (EventLoopGroup.class) {
+            return staticDefaultNumThreads;
+        }
+    }
+
+    /**
      * Closes the static EventLoopGroup, if it exists.  Primarily intended for tests that use the static
      * default EventLoopGroup, before they call waitForNoResources().
      */
