@@ -102,7 +102,7 @@ public class S3RequestMetrics {
     }
 
     public String getServiceId() {
-        return "s3";
+        return "S3";
     }
 
     public String getServiceEndpoint() {
@@ -148,14 +148,14 @@ public class S3RequestMetrics {
         if (this.receiveStartTimestampNs == -1) {
             throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
         }
-        return this.receiveStartTimestampNs;
+        return this.receiveStartTimestampNs - this.startTimestampNs;
     }
 
     public long getTimeToLastByte() throws CrtRuntimeException {
         if (this.receiveEndTimestampNs == -1) {
             throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
         }
-        return this.receiveEndTimestampNs;
+        return this.receiveEndTimestampNs - this.startTimestampNs;
     }
 
     // Please use CRT.awsIsTransientError() to identify transient errors
