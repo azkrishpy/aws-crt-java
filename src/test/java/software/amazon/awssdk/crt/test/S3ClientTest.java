@@ -2006,8 +2006,12 @@ public class S3ClientTest extends CrtTestFixture {
         public void validateMetrics() {
             Assert.assertTrue("API Call duration should be >= 0", apiCallDurationNs >= 0);
             Assert.assertTrue("API call should be successful", apiCallSuccessful);
-            Assert.assertEquals("Service ID should be s3", "s3", serviceId);
+            Assert.assertEquals("Service ID should be S3", "S3", serviceId);
             Assert.assertNotNull("Service endpoint should not be null", serviceEndpoint);
+            Assert.assertTrue("Service endpoint should include a scheme and be a valid URI: " + serviceEndpoint,
+                    serviceEndpoint.startsWith("https://") || serviceEndpoint.startsWith("http://"));
+            Assert.assertEquals("Service endpoint should parse to the expected host",
+                    ENDPOINT, java.net.URI.create(serviceEndpoint).getHost());
             Assert.assertNotNull("Operation name should not be null", operationName);
             Assert.assertFalse("Operation name should not be empty", operationName.isEmpty());
             Assert.assertNotNull("Request ID should not be null", awsRequestId);
