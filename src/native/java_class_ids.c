@@ -1022,6 +1022,19 @@ static void s_cache_s3_request_metrics(JNIEnv *env) {
 
     s3_request_metrics_properties.signing_duration_ns_field_id = (*env)->GetFieldID(env, cls, "signingDurationNs", "J");
 
+    s3_request_metrics_properties.credentials_start_timestamp_ns_field_id =
+        (*env)->GetFieldID(env, cls, "credentialsStartTimestampNs", "J");
+
+    s3_request_metrics_properties.credentials_end_timestamp_ns_field_id =
+        (*env)->GetFieldID(env, cls, "credentialsEndTimestampNs", "J");
+
+    s3_request_metrics_properties.credentials_duration_ns_field_id =
+        (*env)->GetFieldID(env, cls, "credentialsDurationNs", "J");
+
+    s3_request_metrics_properties.part_range_start_field_id = (*env)->GetFieldID(env, cls, "partRangeStart", "J");
+
+    s3_request_metrics_properties.part_range_end_field_id = (*env)->GetFieldID(env, cls, "partRangeEnd", "J");
+
     s3_request_metrics_properties.mem_acquire_start_timestamp_ns_field_id =
         (*env)->GetFieldID(env, cls, "memAcquireStartTimestampNs", "J");
 

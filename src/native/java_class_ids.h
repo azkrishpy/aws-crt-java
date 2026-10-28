@@ -465,6 +465,11 @@ struct java_aws_s3_request_metrics {
     jfieldID sign_start_timestamp_ns_field_id;
     jfieldID sign_end_timestamp_ns_field_id;
     jfieldID signing_duration_ns_field_id;
+    jfieldID credentials_start_timestamp_ns_field_id;
+    jfieldID credentials_end_timestamp_ns_field_id;
+    jfieldID credentials_duration_ns_field_id;
+    jfieldID part_range_start_field_id;
+    jfieldID part_range_end_field_id;
     jfieldID mem_acquire_start_timestamp_ns_field_id;
     jfieldID mem_acquire_end_timestamp_ns_field_id;
     jfieldID mem_acquire_duration_ns_field_id;

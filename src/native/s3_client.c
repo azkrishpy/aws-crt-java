@@ -1041,6 +1041,32 @@ static void s_on_s3_meta_request_telemetry_callback(
             env, metrics_object, s3_request_metrics_properties.signing_duration_ns_field_id, timestamp_value);
     }
 
+    if (aws_s3_request_metrics_get_cred_start_timestamp_ns(metrics, &timestamp_value) == AWS_OP_SUCCESS) {
+        (*env)->SetLongField(
+            env,
+            metrics_object,
+            s3_request_metrics_properties.credentials_start_timestamp_ns_field_id,
+            timestamp_value);
+    }
+
+    if (aws_s3_request_metrics_get_cred_end_timestamp_ns(metrics, &timestamp_value) == AWS_OP_SUCCESS) {
+        (*env)->SetLongField(
+            env, metrics_object, s3_request_metrics_properties.credentials_end_timestamp_ns_field_id, timestamp_value);
+    }
+
+    if (aws_s3_request_metrics_get_cred_duration_ns(metrics, &timestamp_value) == AWS_OP_SUCCESS) {
+        (*env)->SetLongField(
+            env, metrics_object, s3_request_metrics_properties.credentials_duration_ns_field_id, timestamp_value);
+    }
+
+    uint64_t part_range_start = 0;
+    uint64_t part_range_end = 0;
+    aws_s3_request_metrics_get_part_range_start(metrics, &part_range_start);
+    aws_s3_request_metrics_get_part_range_end(metrics, &part_range_end);
+    (*env)->SetLongField(
+        env, metrics_object, s3_request_metrics_properties.part_range_start_field_id, part_range_start);
+    (*env)->SetLongField(env, metrics_object, s3_request_metrics_properties.part_range_end_field_id, part_range_end);
+
     if (aws_s3_request_metrics_get_mem_acquire_start_timestamp_ns(metrics, &timestamp_value) == AWS_OP_SUCCESS) {
         (*env)->SetLongField(
             env,

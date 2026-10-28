@@ -24,6 +24,11 @@ public class S3RequestMetrics {
     // AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE = 14358
     private static final int AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE = 14358;
 
+    // Values of enum aws_s3_request_type
+    private static final int S3_REQUEST_TYPE_GET_OBJECT = 2;
+    private static final int S3_REQUEST_TYPE_UPLOAD_PART = 5;
+    private static final int S3_REQUEST_TYPE_PUT_OBJECT = 10;
+
     private static final String HTTPS_SCHEME = "https";
     private static final String HTTP_SCHEME = "http";
     private static final String SCHEME_SEPARATOR = "://";
@@ -46,6 +51,11 @@ public class S3RequestMetrics {
     private long signStartTimestampNs = -1;
     private long signEndTimestampNs = -1;
     private long signingDurationNs = -1;
+    private long credentialsStartTimestampNs = -1;
+    private long credentialsEndTimestampNs = -1;
+    private long credentialsDurationNs = -1;
+    private long partRangeStart = 0;
+    private long partRangeEnd = 0;
     private long memAcquireStartTimestampNs = -1;
     private long memAcquireEndTimestampNs = -1;
     private long memAcquireDurationNs = -1;
@@ -159,6 +169,54 @@ public class S3RequestMetrics {
             throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
         }
         return this.signingDurationNs;
+    }
+
+    public long getCredentialsStartTimestampNs() throws CrtRuntimeException {
+        if (this.credentialsStartTimestampNs == -1) {
+            throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+        }
+        return this.credentialsStartTimestampNs;
+    }
+
+    public long getCredentialsEndTimestampNs() throws CrtRuntimeException {
+        if (this.credentialsEndTimestampNs == -1) {
+            throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+        }
+        return this.credentialsEndTimestampNs;
+    }
+
+    public long getCredentialsDurationNs() throws CrtRuntimeException {
+        if (this.credentialsDurationNs == -1) {
+            throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+        }
+        return this.credentialsDurationNs;
+    }
+
+    /**
+     * @return download throughput of this request in bytes per second (part size / receiving duration).
+     * @throws CrtRuntimeException if not a GetObject request with a part range
+     */
+    public double getReadThroughputBytesPerSec() throws CrtRuntimeException {
+        return throughputBytesPerSec(requestType == S3_REQUEST_TYPE_GET_OBJECT, receivingDurationNs);
+    }
+
+    /**
+     * @return upload throughput of this request in bytes per second (part size / sending duration).
+     * @throws CrtRuntimeException if not an UploadPart/PutObject request with a part range
+     */
+    public double getWriteThroughputBytesPerSec() throws CrtRuntimeException {
+        return throughputBytesPerSec(
+                requestType == S3_REQUEST_TYPE_UPLOAD_PART || requestType == S3_REQUEST_TYPE_PUT_OBJECT,
+                sendingDurationNs);
+    }
+
+    // Part range is inclusive, and 0/0 means the request has none.
+    private double throughputBytesPerSec(boolean typeMatches, long durationNs) {
+        if (!typeMatches || durationNs <= 0 || partRangeEnd < partRangeStart
+                || (partRangeStart == 0 && partRangeEnd == 0)) {
+            throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+        }
+        return (partRangeEnd - partRangeStart + 1) * 1e9 / durationNs;
     }
 
     public long getTimeToFirstByte() throws CrtRuntimeException {
