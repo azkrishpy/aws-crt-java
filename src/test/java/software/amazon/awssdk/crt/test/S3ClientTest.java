@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -1948,6 +1949,11 @@ public class S3ClientTest extends CrtTestFixture {
         public long timeToFirstByte;
         public long timeToLastByte;
         public long signingDurationNs;
+        public long credentialsStartTimestampNs;
+        public long credentialsEndTimestampNs;
+        public long credentialsDurationNs;
+        public double readThroughputBytesPerSec;
+        public double writeThroughputBytesPerSec;
         public long backoffDelayDurationNs;
         public long serviceCallDurationNs;
         public int retryCount;
@@ -1992,6 +1998,23 @@ public class S3ClientTest extends CrtTestFixture {
                 this.signingDurationNs = -1;
             }
             try {
+                this.credentialsStartTimestampNs = metrics.getCredentialsStartTimestampNs();
+                this.credentialsEndTimestampNs = metrics.getCredentialsEndTimestampNs();
+                this.credentialsDurationNs = metrics.getCredentialsDurationNs();
+            } catch (Exception e) {
+                this.credentialsStartTimestampNs = this.credentialsEndTimestampNs = this.credentialsDurationNs = -1;
+            }
+            try {
+                this.readThroughputBytesPerSec = metrics.getReadThroughputBytesPerSec();
+            } catch (Exception e) {
+                this.readThroughputBytesPerSec = -1;
+            }
+            try {
+                this.writeThroughputBytesPerSec = metrics.getWriteThroughputBytesPerSec();
+            } catch (Exception e) {
+                this.writeThroughputBytesPerSec = -1;
+            }
+            try {
                 this.backoffDelayDurationNs = metrics.getBackoffDelayDurationNs();
             } catch (Exception e) {
                 this.backoffDelayDurationNs = -1;
@@ -2030,6 +2053,19 @@ public class S3ClientTest extends CrtTestFixture {
             Assert.assertTrue("Time to last byte should be > 0", timeToLastByte > 0);
             Assert.assertTrue("Time to last byte should be >= time to first byte", timeToLastByte >= timeToFirstByte);
             Assert.assertTrue("Signing duration should be >= 0", signingDurationNs >= -1);
+            Assert.assertTrue("Credentials should have been resolved through the provider",
+                    credentialsDurationNs >= 0);
+            Assert.assertTrue("Credentials end should not precede start",
+                    credentialsEndTimestampNs >= credentialsStartTimestampNs);
+            Assert.assertEquals("Credentials duration should be end - start",
+                    credentialsEndTimestampNs - credentialsStartTimestampNs, credentialsDurationNs);
+            Assert.assertTrue("Credentials duration should be within signing duration",
+                    credentialsDurationNs <= signingDurationNs);
+            Log.log(Log.LogLevel.Info, Log.LogSubject.JavaCrtS3, String.format(
+                    "Telemetry: credentialsNs=%d signingNs=%d readBps=%f writeBps=%f",
+                    credentialsDurationNs, signingDurationNs, readThroughputBytesPerSec, writeThroughputBytesPerSec));
+            Assert.assertTrue("GET should report read throughput", readThroughputBytesPerSec > 0);
+            Assert.assertEquals("GET should not report write throughput", -1, writeThroughputBytesPerSec, 0);
             Assert.assertTrue("Delay duration should be >= 0", backoffDelayDurationNs >= -1);
             Assert.assertTrue("Service call duration should be >= 0", serviceCallDurationNs >= -1);
             Assert.assertTrue("Retry count should be >= 0", retryCount >= 0);
@@ -2141,6 +2177,192 @@ public class S3ClientTest extends CrtTestFixture {
             }
         } catch (InterruptedException | ExecutionException ex) {
             Assert.fail(ex.getMessage());
+        }
+    }
+
+    private List<CapturedMetrics> runAndCaptureMetrics(S3Client client, S3MetaRequestOptions options,
+            CompletableFuture<Integer> onFinishedFuture, List<CapturedMetrics> captured) throws Exception {
+        try (S3MetaRequest metaRequest = client.makeMetaRequest(options)) {
+            Assert.assertEquals(Integer.valueOf(0), onFinishedFuture.get());
+        }
+        return captured;
+    }
+
+    private S3MetaRequestResponseHandler telemetryCapturingHandler(CompletableFuture<Integer> onFinishedFuture,
+            List<CapturedMetrics> captured) {
+        return new S3MetaRequestResponseHandler() {
+            @Override
+            public int onResponseBody(ByteBuffer bodyBytesIn, long objectRangeStart, long objectRangeEnd) {
+                return 0;
+            }
+
+            @Override
+            public void onFinished(S3FinishedResponseContext context) {
+                if (context.getErrorCode() != 0) {
+                    onFinishedFuture.completeExceptionally(makeExceptionFromFinishedResponseContext(context));
+                    return;
+                }
+                onFinishedFuture.complete(Integer.valueOf(context.getErrorCode()));
+            }
+
+            @Override
+            public void onTelemetry(S3RequestMetrics metrics) {
+                CapturedMetrics m = new CapturedMetrics();
+                m.captureFrom(metrics);
+                synchronized (captured) {
+                    captured.add(m);
+                }
+            }
+        };
+    }
+
+    @Test
+    public void testS3TelemetryCredentialsAndThroughput() throws Exception {
+        skipIfAndroid();
+        skipIfNetworkUnavailable();
+        Assume.assumeTrue(hasAwsCredentials());
+
+        S3ClientOptions clientOptions = new S3ClientOptions().withRegion(REGION);
+        try (S3Client client = createS3Client(clientOptions)) {
+            // Download: multiple parts, each GetObject request reports credentials timing and read throughput.
+            List<CapturedMetrics> gets = new ArrayList<>();
+            CompletableFuture<Integer> getFinished = new CompletableFuture<>();
+            HttpHeader[] getHeaders = { new HttpHeader("Host", ENDPOINT) };
+            runAndCaptureMetrics(client,
+                    new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.GET_OBJECT)
+                            .withHttpRequest(new HttpRequest("GET", PRE_EXIST_10MB_PATH, getHeaders, null))
+                            .withResponseHandler(telemetryCapturingHandler(getFinished, gets)),
+                    getFinished, gets);
+
+            long totalBytes = 0;
+            for (CapturedMetrics m : gets) {
+                if (m.readThroughputBytesPerSec < 0) {
+                    continue;
+                }
+                Assert.assertTrue("GET request should have credentials timing", m.credentialsDurationNs >= 0);
+                Assert.assertEquals(m.credentialsEndTimestampNs - m.credentialsStartTimestampNs,
+                        m.credentialsDurationNs);
+                Assert.assertTrue("Credentials time should be within signing time",
+                        m.credentialsDurationNs <= m.signingDurationNs);
+                Assert.assertEquals("GET should not report write throughput", -1, m.writeThroughputBytesPerSec, 0);
+                totalBytes += Math.round(m.readThroughputBytesPerSec * (m.timeToLastByte - m.timeToFirstByte) / 1e9);
+            }
+            Assert.assertTrue("At least one GET request should report read throughput", totalBytes > 0);
+            // Part sizes derived from the throughput must add up to the object size.
+            Assert.assertEquals("Sum of part sizes behind read throughput", 10 * 1024 * 1024, totalBytes);
+
+            // Upload: each UploadPart request reports credentials timing and write throughput.
+            String key = "/oncall/s3-telemetry-cred-throughput/put-" + UUID.randomUUID();
+            List<CapturedMetrics> puts = new ArrayList<>();
+            CompletableFuture<Integer> putFinished = new CompletableFuture<>();
+            HttpHeader[] putHeaders = { new HttpHeader("Host", ENDPOINT),
+                    new HttpHeader("Content-Length", Integer.toString(20 * 1024 * 1024)) };
+            final ByteBuffer payload = ByteBuffer.wrap(createTestPayload(20 * 1024 * 1024));
+            HttpRequestBodyStream payloadStream = new HttpRequestBodyStream() {
+                @Override
+                public boolean sendRequestBody(ByteBuffer outBuffer) {
+                    ByteBufferUtils.transferData(payload, outBuffer);
+                    return payload.remaining() == 0;
+                }
+
+                @Override
+                public boolean resetPosition() {
+                    return true;
+                }
+
+                @Override
+                public long getLength() {
+                    return payload.capacity();
+                }
+            };
+            runAndCaptureMetrics(client,
+                    new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.PUT_OBJECT)
+                            .withHttpRequest(new HttpRequest("PUT", key, putHeaders, payloadStream))
+                            .withResponseHandler(telemetryCapturingHandler(putFinished, puts)),
+                    putFinished, puts);
+
+            int uploadParts = 0;
+            for (CapturedMetrics m : puts) {
+                if (m.writeThroughputBytesPerSec < 0) {
+                    continue;
+                }
+                uploadParts++;
+                Assert.assertTrue("Upload request should have credentials timing", m.credentialsDurationNs >= 0);
+                Assert.assertEquals("Upload should not report read throughput", -1, m.readThroughputBytesPerSec, 0);
+            }
+            Assert.assertTrue("At least one upload request should report write throughput", uploadParts > 0);
+
+            // Download of an object smaller than the part size: the throughput must reflect the bytes received.
+            String smallKey = "/oncall/s3-telemetry-cred-throughput/small-" + UUID.randomUUID();
+            int smallSize = 1024 * 1024;
+            final ByteBuffer smallPayload = ByteBuffer.wrap(createTestPayload(smallSize));
+            HttpRequestBodyStream smallStream = new HttpRequestBodyStream() {
+                @Override
+                public boolean sendRequestBody(ByteBuffer outBuffer) {
+                    ByteBufferUtils.transferData(smallPayload, outBuffer);
+                    return smallPayload.remaining() == 0;
+                }
+
+                @Override
+                public boolean resetPosition() {
+                    return true;
+                }
+
+                @Override
+                public long getLength() {
+                    return smallPayload.capacity();
+                }
+            };
+            List<CapturedMetrics> smallPuts = new ArrayList<>();
+            CompletableFuture<Integer> smallPutFinished = new CompletableFuture<>();
+            HttpHeader[] smallPutHeaders = { new HttpHeader("Host", ENDPOINT),
+                    new HttpHeader("Content-Length", Integer.toString(smallSize)) };
+            runAndCaptureMetrics(client,
+                    new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.PUT_OBJECT)
+                            .withHttpRequest(new HttpRequest("PUT", smallKey, smallPutHeaders, smallStream))
+                            .withResponseHandler(telemetryCapturingHandler(smallPutFinished, smallPuts)),
+                    smallPutFinished, smallPuts);
+
+            List<CapturedMetrics> smallGets = new ArrayList<>();
+            CompletableFuture<Integer> smallGetFinished = new CompletableFuture<>();
+            runAndCaptureMetrics(client,
+                    new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.GET_OBJECT)
+                            .withHttpRequest(new HttpRequest("GET", smallKey, getHeaders, null))
+                            .withResponseHandler(telemetryCapturingHandler(smallGetFinished, smallGets)),
+                    smallGetFinished, smallGets);
+            long smallBytes = 0;
+            for (CapturedMetrics m : smallGets) {
+                if (m.readThroughputBytesPerSec > 0) {
+                    smallBytes += Math.round(m.readThroughputBytesPerSec * (m.timeToLastByte - m.timeToFirstByte) / 1e9);
+                }
+            }
+            Assert.assertEquals("Read throughput of a small object should be based on the bytes received", smallSize,
+                    smallBytes);
+
+            // A failed attempt reports zero throughput.
+            List<CapturedMetrics> failedGets = new ArrayList<>();
+            CompletableFuture<Integer> failedGetFinished = new CompletableFuture<>();
+            try {
+                runAndCaptureMetrics(client,
+                        new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.GET_OBJECT)
+                                .withHttpRequest(new HttpRequest("GET",
+                                        "/oncall/s3-telemetry-cred-throughput/missing-" + UUID.randomUUID(),
+                                        getHeaders, null))
+                                .withResponseHandler(telemetryCapturingHandler(failedGetFinished, failedGets)),
+                        failedGetFinished, failedGets);
+                Assert.fail("GET of a missing object should fail");
+            } catch (ExecutionException expected) {
+                // expected: the object does not exist
+            }
+            boolean sawFailedAttempt = false;
+            for (CapturedMetrics m : failedGets) {
+                if (m.errorCode != 0) {
+                    sawFailedAttempt = true;
+                    Assert.assertEquals("Failed attempt should report zero read throughput", 0,
+                            m.readThroughputBytesPerSec, 0);
+                }
+            }
+            Assert.assertTrue("The missing object should produce a failed attempt", sawFailedAttempt);
         }
     }
 
