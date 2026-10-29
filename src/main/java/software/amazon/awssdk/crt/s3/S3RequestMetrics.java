@@ -56,6 +56,8 @@ public class S3RequestMetrics {
     private long credentialsDurationNs = -1;
     private long partRangeStart = 0;
     private long partRangeEnd = 0;
+    private boolean hasPartRange = false;
+    private long responseBodySize = 0;
     private long memAcquireStartTimestampNs = -1;
     private long memAcquireEndTimestampNs = -1;
     private long memAcquireDurationNs = -1;
@@ -193,30 +195,38 @@ public class S3RequestMetrics {
     }
 
     /**
-     * @return download throughput of this request in bytes per second (part size / receiving duration).
-     * @throws CrtRuntimeException if not a GetObject request with a part range
+     * @return download throughput of this attempt in bytes per second (bytes received / receiving duration), 0 if
+     *         the attempt failed.
+     * @throws CrtRuntimeException if not a GetObject request, or no receiving duration was recorded
      */
     public double getReadThroughputBytesPerSec() throws CrtRuntimeException {
-        return throughputBytesPerSec(requestType == S3_REQUEST_TYPE_GET_OBJECT, receivingDurationNs);
+        return throughputBytesPerSec(requestType == S3_REQUEST_TYPE_GET_OBJECT, responseBodySize, receivingDurationNs);
     }
 
     /**
-     * @return upload throughput of this request in bytes per second (part size / sending duration).
-     * @throws CrtRuntimeException if not an UploadPart/PutObject request with a part range
+     * @return upload throughput of this attempt in bytes per second (part size / sending duration), 0 if the attempt
+     *         failed.
+     * @throws CrtRuntimeException if not an UploadPart/PutObject request with a part range, or no sending duration
+     *         was recorded
      */
     public double getWriteThroughputBytesPerSec() throws CrtRuntimeException {
-        return throughputBytesPerSec(
-                requestType == S3_REQUEST_TYPE_UPLOAD_PART || requestType == S3_REQUEST_TYPE_PUT_OBJECT,
-                sendingDurationNs);
+        boolean typeMatches = requestType == S3_REQUEST_TYPE_UPLOAD_PART || requestType == S3_REQUEST_TYPE_PUT_OBJECT;
+        // Part range is inclusive.
+        long partSize = hasPartRange && partRangeEnd >= partRangeStart ? partRangeEnd - partRangeStart + 1 : -1;
+        return throughputBytesPerSec(typeMatches && partSize >= 0, partSize, sendingDurationNs);
     }
 
-    // Part range is inclusive, and 0/0 means the request has none.
-    private double throughputBytesPerSec(boolean typeMatches, long durationNs) {
-        if (!typeMatches || durationNs <= 0 || partRangeEnd < partRangeStart
-                || (partRangeStart == 0 && partRangeEnd == 0)) {
+    private double throughputBytesPerSec(boolean available, long bytes, long durationNs) {
+        if (!available) {
             throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
         }
-        return (partRangeEnd - partRangeStart + 1) * 1e9 / durationNs;
+        if (errorCode != 0) {
+            return 0;
+        }
+        if (durationNs <= 0) {
+            throw new CrtRuntimeException(AWS_ERROR_S3_METRIC_DATA_NOT_AVAILABLE);
+        }
+        return bytes * 1e9 / durationNs;
     }
 
     public long getTimeToFirstByte() throws CrtRuntimeException {

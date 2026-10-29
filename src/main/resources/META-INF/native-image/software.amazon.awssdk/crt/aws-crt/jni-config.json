@@ -2308,6 +2308,27 @@
         "name": "signingDurationNs"
       },
       {
+        "name": "credentialsStartTimestampNs"
+      },
+      {
+        "name": "credentialsEndTimestampNs"
+      },
+      {
+        "name": "credentialsDurationNs"
+      },
+      {
+        "name": "partRangeStart"
+      },
+      {
+        "name": "partRangeEnd"
+      },
+      {
+        "name": "hasPartRange"
+      },
+      {
+        "name": "responseBodySize"
+      },
+      {
         "name": "memAcquireStartTimestampNs"
       },
       {

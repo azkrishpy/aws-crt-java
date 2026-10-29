@@ -470,6 +470,8 @@ struct java_aws_s3_request_metrics {
     jfieldID credentials_duration_ns_field_id;
     jfieldID part_range_start_field_id;
     jfieldID part_range_end_field_id;
+    jfieldID has_part_range_field_id;
+    jfieldID response_body_size_field_id;
     jfieldID mem_acquire_start_timestamp_ns_field_id;
     jfieldID mem_acquire_end_timestamp_ns_field_id;
     jfieldID mem_acquire_duration_ns_field_id;

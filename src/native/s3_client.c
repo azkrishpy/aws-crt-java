@@ -1066,6 +1066,15 @@ static void s_on_s3_meta_request_telemetry_callback(
     (*env)->SetLongField(
         env, metrics_object, s3_request_metrics_properties.part_range_start_field_id, part_range_start);
     (*env)->SetLongField(env, metrics_object, s3_request_metrics_properties.part_range_end_field_id, part_range_end);
+    (*env)->SetBooleanField(
+        env,
+        metrics_object,
+        s3_request_metrics_properties.has_part_range_field_id,
+        aws_s3_request_metrics_has_part_range(metrics));
+    uint64_t response_body_size = 0;
+    aws_s3_request_metrics_get_response_body_size(metrics, &response_body_size);
+    (*env)->SetLongField(
+        env, metrics_object, s3_request_metrics_properties.response_body_size_field_id, response_body_size);
 
     if (aws_s3_request_metrics_get_mem_acquire_start_timestamp_ns(metrics, &timestamp_value) == AWS_OP_SUCCESS) {
         (*env)->SetLongField(

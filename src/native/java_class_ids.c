@@ -1035,6 +1035,10 @@ static void s_cache_s3_request_metrics(JNIEnv *env) {
 
     s3_request_metrics_properties.part_range_end_field_id = (*env)->GetFieldID(env, cls, "partRangeEnd", "J");
 
+    s3_request_metrics_properties.has_part_range_field_id = (*env)->GetFieldID(env, cls, "hasPartRange", "Z");
+
+    s3_request_metrics_properties.response_body_size_field_id = (*env)->GetFieldID(env, cls, "responseBodySize", "J");
+
     s3_request_metrics_properties.mem_acquire_start_timestamp_ns_field_id =
         (*env)->GetFieldID(env, cls, "memAcquireStartTimestampNs", "J");
 

@@ -2291,6 +2291,78 @@ public class S3ClientTest extends CrtTestFixture {
                 Assert.assertEquals("Upload should not report read throughput", -1, m.readThroughputBytesPerSec, 0);
             }
             Assert.assertTrue("At least one upload request should report write throughput", uploadParts > 0);
+
+            // Download of an object smaller than the part size: the throughput must reflect the bytes received.
+            String smallKey = "/oncall/s3-telemetry-cred-throughput/small-" + UUID.randomUUID();
+            int smallSize = 1024 * 1024;
+            final ByteBuffer smallPayload = ByteBuffer.wrap(createTestPayload(smallSize));
+            HttpRequestBodyStream smallStream = new HttpRequestBodyStream() {
+                @Override
+                public boolean sendRequestBody(ByteBuffer outBuffer) {
+                    ByteBufferUtils.transferData(smallPayload, outBuffer);
+                    return smallPayload.remaining() == 0;
+                }
+
+                @Override
+                public boolean resetPosition() {
+                    return true;
+                }
+
+                @Override
+                public long getLength() {
+                    return smallPayload.capacity();
+                }
+            };
+            List<CapturedMetrics> smallPuts = new ArrayList<>();
+            CompletableFuture<Integer> smallPutFinished = new CompletableFuture<>();
+            HttpHeader[] smallPutHeaders = { new HttpHeader("Host", ENDPOINT),
+                    new HttpHeader("Content-Length", Integer.toString(smallSize)) };
+            runAndCaptureMetrics(client,
+                    new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.PUT_OBJECT)
+                            .withHttpRequest(new HttpRequest("PUT", smallKey, smallPutHeaders, smallStream))
+                            .withResponseHandler(telemetryCapturingHandler(smallPutFinished, smallPuts)),
+                    smallPutFinished, smallPuts);
+
+            List<CapturedMetrics> smallGets = new ArrayList<>();
+            CompletableFuture<Integer> smallGetFinished = new CompletableFuture<>();
+            runAndCaptureMetrics(client,
+                    new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.GET_OBJECT)
+                            .withHttpRequest(new HttpRequest("GET", smallKey, getHeaders, null))
+                            .withResponseHandler(telemetryCapturingHandler(smallGetFinished, smallGets)),
+                    smallGetFinished, smallGets);
+            long smallBytes = 0;
+            for (CapturedMetrics m : smallGets) {
+                if (m.readThroughputBytesPerSec > 0) {
+                    smallBytes += Math.round(m.readThroughputBytesPerSec * (m.timeToLastByte - m.timeToFirstByte) / 1e9);
+                }
+            }
+            Assert.assertEquals("Read throughput of a small object should be based on the bytes received", smallSize,
+                    smallBytes);
+
+            // A failed attempt reports zero throughput.
+            List<CapturedMetrics> failedGets = new ArrayList<>();
+            CompletableFuture<Integer> failedGetFinished = new CompletableFuture<>();
+            try {
+                runAndCaptureMetrics(client,
+                        new S3MetaRequestOptions().withMetaRequestType(MetaRequestType.GET_OBJECT)
+                                .withHttpRequest(new HttpRequest("GET",
+                                        "/oncall/s3-telemetry-cred-throughput/missing-" + UUID.randomUUID(),
+                                        getHeaders, null))
+                                .withResponseHandler(telemetryCapturingHandler(failedGetFinished, failedGets)),
+                        failedGetFinished, failedGets);
+                Assert.fail("GET of a missing object should fail");
+            } catch (ExecutionException expected) {
+                // expected: the object does not exist
+            }
+            boolean sawFailedAttempt = false;
+            for (CapturedMetrics m : failedGets) {
+                if (m.errorCode != 0) {
+                    sawFailedAttempt = true;
+                    Assert.assertEquals("Failed attempt should report zero read throughput", 0,
+                            m.readThroughputBytesPerSec, 0);
+                }
+            }
+            Assert.assertTrue("The missing object should produce a failed attempt", sawFailedAttempt);
         }
     }
 
